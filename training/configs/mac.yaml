@@ -8,9 +8,9 @@ seq_len: 32
 epochs: 2
 minibatches: 4
 device: mps
-total_steps: 25000000
+total_steps: 21000000   # 27 Nov 01:30: shortened so LR anneals before the 10:00 deadline
 phase_a_end: 3000000      # DAgger warm-up (copy the honest teacher)
 phase_b_end: 10000000     # kickstarted PPO (teacher weight 1 -> 0.1)
 ckpt_every: 8
-max_hours: 11
-tier_weights: [0.25, 0.3, 0.3, 0.15]
+max_hours: 6             # restarted 01:30 -> hard stop ~07:30; finalize stops it at 06:45
+tier_weights: [0.17, 0.2, 0.25, 0.38]   # 01:30: T4 (hardest, weakest) gets ~35% of games instead of ~13%

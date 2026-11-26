@@ -32,6 +32,15 @@ def row(label, s):
 
 def main():
     rnd, tea, agent = load("random"), load("teacher"), load("agent")
+    n_per_tier = len(agent["maps"]) // 4 if agent and agent.get("maps") else 0
+    maps_note = (f"{n_per_tier} fixed held-out maps per tier ({4 * n_per_tier} total), never used in training; "
+                 "all three agents play the same maps.") if n_per_tier else "Fixed held-out seeds, never used in training."
+    real = load("real")
+    if real:
+        lv = real["levels"]
+        maps_note += (f"<br>Real Freedoom 2 levels ({', '.join(x['level'] for x in lv)}, 4200-tic cap, much larger than the grid "
+                      f"maps): exits {sum(x['exit'] for x in lv)}/{len(lv)}, kills {sum(x['kills'] for x in lv)}, "
+                      f"doors opened {sum(x['doors'] for x in lv)}, deaths {sum(x['dead'] for x in lv)}/{len(lv)}.")
     odo = json.loads((ROOT / "submission/weights/odometry.json").read_text()).get("drift_heldout", {})
     html = f"""<!doctype html><html><head><meta charset="utf-8"><title>YODHA brief</title>
 <style>
@@ -151,7 +160,7 @@ and anti-stuck penalties.</li>
 {row("Random actions", rnd)}{row("Teacher (privileged, training only)", tea)}{row("<b>YODHA (submitted)</b>", agent)}</table>
 <div class=m>
 Per map: exit 50 + health/time bonus, keys 10, doors 3, locks 8, coverage 20×sector fraction, kills 2, −0.02/HP, −10 for an early death.
-The maps are fixed held-out seeds that were never used in training.
+{maps_note}
 </div>
 
 <h2>Rules compliance, limitations, next steps</h2>

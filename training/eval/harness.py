@@ -100,8 +100,9 @@ def play_one(args) -> dict:
     return m
 
 
-def evaluate(weights: str | None, mode: str, maps: int, workers: int, temperature: float = 0.0) -> dict:
-    jobs = [(tier, i, weights, mode, temperature) for tier in (1, 2, 3, 4) for i in range(maps)]
+def evaluate(weights: str | None, mode: str, maps: int, workers: int, temperature: float = 0.0, start: int = 0) -> dict:
+    """Play `maps` held-out maps per tier (map indices start..start+maps-1) and summarise."""
+    jobs = [(tier, i, weights, mode, temperature) for tier in (1, 2, 3, 4) for i in range(start, start + maps)]
     with ProcessPoolExecutor(max_workers=workers) as ex:
         results = list(ex.map(play_one, jobs))
     summary = {"mode": mode, "weights": weights, "temperature": temperature, "tiers": {}}
@@ -122,6 +123,47 @@ def evaluate(weights: str | None, mode: str, maps: int, workers: int, temperatur
     summary["weighted_score"] = total
     summary["maps"] = results
     return summary
+
+
+def play_real(args) -> dict:
+    """One real Freedoom 2 level (hand-made, much larger than our grid maps); reports what the agent achieved."""
+    level, weights, temperature = args
+    os.environ["OMP_NUM_THREADS"] = "1"
+    import torch
+    import vizdoom
+
+    torch.set_num_threads(1)
+    from doom_env import make_env
+    from submission.yodha.policy import YodhaPolicy
+
+    wad = os.path.join(os.path.dirname(vizdoom.__file__), "freedoom2.wad")
+    env = make_env(wad, level, episode_ticks=4200)
+    obs, _ = env.reset(seed=1)
+    agent = YodhaPolicy(weights, device="cpu")
+    agent.temperature = temperature
+    agent.reset()
+    cells, doors, info = set(), set(), {}
+    while True:
+        st = env.privileged_state()
+        cells.add((int(st["x"] // 128), int(st["y"] // 128)))
+        obs, _, term, trunc, info = env.step(agent.act(obs))
+        ps = env.privileged_state()
+        for sec, lock in env.mapinfo.door_sectors.items():
+            if ps["sector_ceiling"][sec] - ps["sector_floor"][sec] > 56:
+                doors.add((sec, lock))
+        if term or trunc:
+            break
+    st = env.privileged_state()
+    env.close()
+    return dict(level=level, exit=bool(info.get("exit_reached")), dead=bool(st["dead"]), tic=int(st["tic"]),
+                kills=int(st["kills"]), keys=int((st["keys"] > 0).sum()), doors=len(doors),
+                cells_128=len(cells), damage=float(st["damage_taken"]))
+
+
+def evaluate_real(weights: str, levels: list[str], workers: int, temperature: float) -> dict:
+    with ProcessPoolExecutor(max_workers=workers) as ex:
+        res = list(ex.map(play_real, [(lv, weights, temperature) for lv in levels]))
+    return {"weights": weights, "temperature": temperature, "levels": res}
 
 
 def print_summary(s: dict) -> None:

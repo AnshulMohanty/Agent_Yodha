@@ -72,6 +72,9 @@ def install(s: dict, c: Path, t: float, push: bool) -> bool:
         subprocess.run(["git", "add", "submission/weights", "brief"], cwd=ROOT, check=True)
         msg = (f"Promote {c.name} (T={t}): held-out proxy score {s['weighted_score']:.0f}\n\n"
                "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>")
+        if subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=ROOT).returncode == 0:
+            print("nothing changed: no commit")
+            return True
         subprocess.run(["git", "commit", "-m", msg], cwd=ROOT, check=True)
         subprocess.run(["git", "push", "origin", "main"], cwd=ROOT, check=True)
         print("pushed")
