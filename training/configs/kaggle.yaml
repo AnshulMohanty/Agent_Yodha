@@ -10,8 +10,8 @@ minibatches: 4
 device: cuda
 seed: 1
 total_steps: 25000000
-phase_a_end: 3000000
-phase_b_end: 10000000
+phase_a_end: 1500000
+phase_b_end: 8000000
 ckpt_every: 8
 max_hours: 11
 tier_weights: [0.2, 0.3, 0.3, 0.2]
