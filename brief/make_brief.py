@@ -1,0 +1,182 @@
+"""Build the 2-page project brief (brief/brief.html → brief/brief.pdf via headless Chrome).
+
+Results are read from runs/eval/*.json (random.json, teacher.json, agent.json) when present.
+Usage: uv run python brief/make_brief.py
+"""
+from __future__ import annotations
+
+import json
+import subprocess
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+OUT_HTML = ROOT / "brief" / "brief.html"
+OUT_PDF = ROOT / "brief" / "brief.pdf"
+CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+
+def load(name):
+    p = ROOT / "runs" / "eval" / f"{name}.json"
+    return json.loads(p.read_text()) if p.exists() else None
+
+
+def row(label, s):
+    if not s:
+        return f"<tr><td>{label}</td>" + "<td>–</td>" * 5 + "</tr>"
+    cells = [f"{s['weighted_score']:.0f}"]
+    for t in ("1", "2", "3", "4"):
+        d = s["tiers"].get(t) or s["tiers"].get(int(t))
+        cells.append(f"{d['score']:.0f} <span class=m>(exit {d['exit']:.0%}, keys {d['keys']:.0%}, cov {d['coverage']:.0%})</span>")
+    return f"<tr><td>{label}</td>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>"
+
+
+def main():
+    rnd, tea, agent = load("random"), load("teacher"), load("agent")
+    odo = json.loads((ROOT / "submission/weights/odometry.json").read_text()).get("drift_heldout", {})
+    html = f"""<!doctype html><html><head><meta charset="utf-8"><title>YODHA brief</title>
+<style>
+@page {{ size: A4; margin: 11mm 12mm; }}
+body {{ font-family: -apple-system, Helvetica, Arial, sans-serif; font-size: 9.3pt; line-height: 1.32; color: #111; }}
+h1 {{ font-size: 17pt; margin: 0 0 2px; }} h2 {{ font-size: 11pt; margin: 9px 0 3px; color: #7a1010; border-bottom: 1px solid #ddd; }}
+.sub {{ color: #555; margin-bottom: 6px; }} table {{ border-collapse: collapse; width: 100%; font-size: 8.4pt; }}
+td, th {{ border: 1px solid #ccc; padding: 2px 4px; vertical-align: top; }} th {{ background: #f3f3f3; }}
+.m {{ color: #666; font-size: 7.4pt; }} .two {{ display: flex; gap: 12px; }} .two > div {{ flex: 1; }}
+ul {{ margin: 2px 0 2px 16px; padding: 0; }} li {{ margin: 1px 0; }} .pb {{ page-break-before: always; }}
+code {{ font-size: 8.3pt; background: #f4f4f4; padding: 0 2px; }}
+</style></head><body>
+<h1>YODHA: a DOOM agent that remembers, explores and finishes levels</h1>
+<div class=sub>Yugaantar 2026 · DevForge Track 1 "Can It Play DOOM?" · repo: github.com/AnshulMohanty/Agent_Yodha</div>
+
+<h2>USP</h2>
+<ul>
+<li><b>Spatial memory, built from rays.</b> A two-scale egocentric semantic map (EgoMap) built from the 64 rays plus calibrated
+odometry. It remembers walls, doors, <i>locked doors</i>, keys, items, enemies, visited cells and the exploration frontier,
+so the agent can come back to a locked door with the key instead of looping.</li>
+<li><b>Honest privileged teacher → DAgger → kickstarted PPO.</b> A training-only expert sees the true map but only
+<i>knows</i> what the student has observed, so every decision is learnable from the student's own history.
+The student copies it on every visited state, then PPO improves on it with a scorer-aligned reward.
+Long-horizon behaviour (key → lock → exit) comes in millions of steps on a laptop, not billions.</li>
+<li><b>Training maps in the organizers' own format.</b> Procedural UDMF grid maps with exactly the template fixtures' door,
+lock and exit specials (Door_Raise 12, Door_LockedRaise 13 with locks 129–131, Exit_Normal 243 on GATE floors or switches),
+four tiers, plus real Freedoom 2 levels, so the agent generalises zero-shot instead of memorising.</li>
+</ul>
+
+<h2>Neural architecture (≈4.6M params, ≈5 ms per decision on 1 CPU thread)</h2>
+<svg viewBox="0 0 760 150" width="100%" style="font-size:9px">
+<defs><marker id="a" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#444"/></marker></defs>
+<g fill="#eef3fb" stroke="#4a6fa5">
+<rect x="2" y="2" width="150" height="20"/><rect x="2" y="26" width="150" height="20"/><rect x="2" y="50" width="150" height="20"/>
+<rect x="2" y="74" width="150" height="20"/><rect x="2" y="98" width="150" height="46"/>
+<rect x="190" y="2" width="130" height="20"/><rect x="190" y="26" width="130" height="20"/><rect x="190" y="50" width="130" height="20"/>
+<rect x="190" y="74" width="130" height="20"/><rect x="190" y="98" width="130" height="20"/><rect x="190" y="122" width="130" height="20"/>
+</g>
+<g fill="#fff3e6" stroke="#c77a1a"><rect x="360" y="55" width="90" height="36"/><rect x="480" y="55" width="70" height="36"/></g>
+<g fill="#eaf7ea" stroke="#3b8a3b"><rect x="590" y="10" width="165" height="30"/><rect x="590" y="60" width="165" height="30"/><rect x="590" y="108" width="165" height="30"/></g>
+<g fill="#111">
+<text x="6" y="15">rays 64×[dist, hit-type, Δdist]</text><text x="6" y="39">visible entities (≤32)</text><text x="6" y="63">vitals + self-history + prev action</text>
+<text x="6" y="87">RGB + depth 60×80</text><text x="6" y="112">odometry → EgoMap world grid</text><text x="6" y="125">320×320 × 9 channels</text><text x="6" y="138">(heading-up crops)</text>
+<text x="194" y="15">circular Conv1d</text><text x="194" y="39">MLP + set-attention</text><text x="194" y="63">MLP</text>
+<text x="194" y="87">CNN (exits, doors, keys)</text><text x="194" y="111">fine crop 64×64 → CNN</text><text x="194" y="135">coarse crop 32×32 → CNN</text>
+<text x="368" y="70">Linear 512</text><text x="368" y="83">(fusion)</text><text x="490" y="77">GRU 512</text>
+<text x="595" y="23">intent head (6): explore / fight /</text><text x="595" y="35">key / door / exit / pickup → FiLM</text>
+<text x="595" y="73">6 factorized action heads → 9 buttons</text><text x="595" y="85">(move, strafe, turn, attack, use, weapon)</text>
+<text x="595" y="121">training only: privileged critic,</text><text x="595" y="133">aux heads (exit seen, door, frontier)</text>
+</g>
+<g stroke="#444" marker-end="url(#a)"><line x1="152" y1="12" x2="188" y2="12"/><line x1="152" y1="36" x2="188" y2="36"/><line x1="152" y1="60" x2="188" y2="60"/>
+<line x1="152" y1="84" x2="188" y2="84"/><line x1="152" y1="112" x2="188" y2="108"/><line x1="152" y1="125" x2="188" y2="132"/>
+<line x1="320" y1="40" x2="358" y2="68"/><line x1="320" y1="110" x2="358" y2="80"/><line x1="450" y1="73" x2="478" y2="73"/>
+<line x1="550" y1="65" x2="588" y2="25"/><line x1="550" y1="73" x2="588" y2="75"/><line x1="550" y1="85" x2="588" y2="120"/></g>
+</svg>
+<ul>
+<li><b>Variable enemies:</b> each entity is embedded with its type, then two learned queries ("threat", "goal") attend over the masked set.</li>
+<li><b>Hierarchical control:</b> the intent head is supervised by the teacher's intent. It conditions the action heads through FiLM,
+so behaviour is interpretable (glass-box videos show intent probabilities live).</li>
+<li><b>USE timing</b> is learned. The previous action is an input, because Doom fires USE on the button-down edge and re-pressing it reverses a moving door.</li>
+</ul>
+
+<h2>Spatial memory design (EgoMap)</h2>
+<div class=two><div><ul>
+<li><b>Odometry from the agent's own signals only.</b> Heading comes from a calibrated table over the last turn presses; Doom
+keyboard turning is deterministic, with special start-of-map keys. Position comes from a linear model of the ego velocity in <code>vitals</code>.
+Held-out drift: heading <b>{odo.get('final_heading_err_mean_deg', 1):.1f}°</b> after 500 steps, position <b>{odo.get('pos_err_pct_of_path_mean', 7):.1f}%</b> of path.</li>
+<li><b>Writing:</b> each ray marks free space up to its hit and a typed hit cell (wall / door / locked / enemy / item).
+Entities are placed from (distance, sin, cos). Enemies and projectiles decay; keys are cleared when a key flag flips.</li>
+</ul></div><div><ul>
+<li><b>Reading:</b> heading-up crops, fine (64×64 @ 32u, ±1024u) and coarse (32×32 @ 128u, ±2048u, incrementally max-pooled),
+plus a locally computed frontier channel. The CNN reads the memory; <b>no planning or search runs on it</b>.</li>
+<li><b>Cost:</b> 0.7 ms per step in numpy, about 5 ms per decision in total on one thread (validator p99 ≈ 8 ms vs a 40 ms budget).</li>
+</ul></div></div>
+
+<div class=pb></div>
+<h2>Training and exploration pipeline</h2>
+<div class=two><div><ul>
+<li><b>Map generator</b> (4 tiers): rooms, corridors, doors on 1-wide doorways, key/lock gates on articulation cells, with keys in side branches;
+monsters, items, ambushes, exit alcove or exit switch. Randomised textures, light and heights. Solvability is checked by BFS over (cell, keys).
+Doors are never placed next to locks, because a Doom door only opens to its lowest neighbouring ceiling.</li>
+<li><b>Honest teacher</b> (training only): BFS over <i>seen</i> cells, with priorities fight → low-health pickup → exit → key → nearest frontier.
+It presses USE once per door. Exits and keys are "known" only once they've been inside the 90° view.</li>
+<li><b>Reward</b> (privileged state, training only), mirroring the scorer:</li>
+</ul>
+<table>
+<tr><th>Event</th><th>Reward</th></tr>
+<tr><td>Exit</td><td>+10 (+ health/time bonus)</td></tr>
+<tr><td>Key</td><td>+3</td></tr>
+<tr><td>Door opened / unlocked</td><td>+1 / +4</td></tr>
+<tr><td>New sector / new 128u cell</td><td>+0.3 / +0.05</td></tr>
+<tr><td>Kill</td><td>+1</td></tr>
+<tr><td>Damage</td><td>−0.01 per HP</td></tr>
+<tr><td>Death</td><td>−5</td></tr>
+<tr><td>Anti-stuck, anti-USE-spam, potential toward the known objective</td><td>small</td></tr>
+</table>
+</div><div><ul>
+<li><b>Kickstarted recurrent PPO</b> (our implementation; CleanRL used only as a reference):
+
+  <table>
+  <tr><th>Phase</th><th>What happens</th></tr>
+  <tr><td>A: DAgger</td><td>Teacher CE only. The teacher executes 50% → 0% of 16-step chunks.</td></tr>
+  <tr><td>B</td><td>PPO + CE, with the teacher weight going 1 → 0.1</td></tr>
+  <tr><td>C</td><td>PPO + 0.05·CE</td></tr>
+  </table>
+
+  The teacher labels every state the <i>student</i> visits.</li>
+<li>GAE (γ 0.995, λ 0.95), TBPTT over 32 steps, return-normalised reward, asymmetric critic (privileged features),
+auxiliary losses, and a tier curriculum that favours 20–80% success. Real Freedoom 2 maps are mixed into the RL phases.</li>
+<li><b>Exploration drivers:</b> new-sector and new-cell rewards, the frontier channel, self-history inputs (visits here, stuck counter, steps since a new cell),
+and anti-stuck penalties.</li>
+<li><b>Compute:</b> MacBook Air M5. Shared-memory workers (≈500 env steps/s), learner on the Apple GPU, plus a second run on a Kaggle T4.</li>
+</ul></div></div>
+
+<h2>Results on held-out maps (proxy of the official categories, tier-weighted 1/2/3/4)</h2>
+<table><tr><th>Agent</th><th>Weighted</th><th>T1 combat</th><th>T2 explore</th><th>T3 key→lock→exit</th><th>T4 gauntlet</th></tr>
+{row("Random actions", rnd)}{row("Teacher (privileged, training only)", tea)}{row("<b>YODHA (submitted)</b>", agent)}</table>
+<div class=m>
+Per map: exit 50 + health/time bonus, keys 10, doors 3, locks 8, coverage 20×sector fraction, kills 2, −0.02/HP, −10 for an early death.
+The maps are fixed held-out seeds that were never used in training.
+</div>
+
+<h2>Rules compliance, limitations, next steps</h2>
+<ul>
+<li><b>Compliance:</b>
+  <ul>
+  <li>Actions are argmax/sampling over YodhaNet outputs. <code>tests/test_audit.py</code> forbids planners, atan2 and training imports in <code>submission/</code>.</li>
+  <li>The teacher, BFS and privileged reward live only in <code>training/</code> ("training-time scaffolding", RULES §1–2).</li>
+  <li>No SB3. Evaluation maps are never accessed.</li>
+  </ul></li>
+<li><b>Limitations:</b>
+  <ul>
+  <li>Odometry drifts on long runs and after collisions or knock-back. The EgoMap is self-consistent locally but not globally exact.</li>
+  <li>Training maps are axis-aligned grids; Freedoom levels add some irregular geometry.</li>
+  <li>The teacher is weak in heavy tier-4 fights, so tier-4 combat depends on PPO.</li>
+  </ul></li>
+<li><b>Next steps:</b> scan-matching to correct drift, a longer PPO phase, a learned map-write module (differentiable EgoMap), and a recorded-demo curriculum on harder hand-made maps.</li>
+</ul>
+</body></html>"""
+    OUT_HTML.write_text(html)
+    if Path(CHROME).exists():
+        subprocess.run([CHROME, "--headless", "--disable-gpu", "--no-pdf-header-footer", f"--print-to-pdf={OUT_PDF}",
+                        OUT_HTML.as_uri()], check=False, capture_output=True)
+    print("wrote", OUT_HTML, OUT_PDF if OUT_PDF.exists() else "(no pdf)")
+
+
+if __name__ == "__main__":
+    main()
