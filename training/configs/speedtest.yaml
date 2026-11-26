@@ -1,0 +1,10 @@
+run_name: speedtest
+n_workers: 8
+envs_per_worker: 4
+rollout: 128
+seq_len: 32
+epochs: 3
+minibatches: 4
+device: mps
+total_steps: 20480
+ckpt_every: 100

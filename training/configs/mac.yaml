@@ -1,0 +1,16 @@
+# Main Mac run (MacBook Air M5): 8 worker processes x 4 games, learner on the Apple GPU (MPS).
+# ~450-500 env steps/s -> ~1.7M steps/hour.
+run_name: mac_main
+n_workers: 8
+envs_per_worker: 4
+rollout: 128
+seq_len: 32
+epochs: 2
+minibatches: 4
+device: mps
+total_steps: 25000000
+phase_a_end: 3000000      # DAgger warm-up (copy the honest teacher)
+phase_b_end: 10000000     # kickstarted PPO (teacher weight 1 -> 0.1)
+ckpt_every: 8
+max_hours: 11
+tier_weights: [0.25, 0.3, 0.3, 0.15]

@@ -52,11 +52,32 @@ _COARSE_OFF = _crop_offsets(COARSE, COARSE_RES)
 class EgoMap:
     def __init__(self):
         self.grid = np.zeros((N_CH, SIZE, SIZE), np.uint8)
+        self.pooled = np.zeros((N_CH, SIZE // 4, SIZE // 4), np.uint8)  # 128-unit max-pooled copy
+        self._blocks = self.grid.reshape(N_CH, SIZE // 4, 4, SIZE // 4, 4)
+        self._touched: list[np.ndarray] = []
         self.reset()
 
     def reset(self) -> None:
         self.grid[:] = 0
+        self.pooled[:] = 0
+        self._touched = []
         self.prev_keys = np.zeros(6, np.float32)
+
+    def _touch(self, rows, cols) -> None:
+        if len(rows):
+            self._touched.append((np.asarray(rows) // 4) * (SIZE // 4) + np.asarray(cols) // 4)
+
+    def _refresh_pooled(self) -> None:
+        """Recompute only the 128-unit blocks whose fine cells changed this step."""
+        if not self._touched:
+            return
+        ids = np.unique(np.concatenate(self._touched))
+        self._touched = []
+        br, bc = ids // (SIZE // 4), ids % (SIZE // 4)
+        ok = (br >= 0) & (br < SIZE // 4) & (bc >= 0) & (bc < SIZE // 4)
+        br, bc = br[ok], bc[ok]
+        vals = self._blocks[:, br, :, bc, :].max(axis=(2, 3))  # (n, C)
+        self.pooled[:, br, bc] = vals.T
 
     def _cell(self, x, y):
         return (np.floor(np.asarray(y) / RES).astype(np.int64) + CENTER,
@@ -65,12 +86,16 @@ class EgoMap:
     def _put(self, ch: int, rows, cols, value: int = 255) -> None:
         ok = (rows >= 0) & (rows < SIZE) & (cols >= 0) & (cols < SIZE)
         self.grid[ch, rows[ok], cols[ok]] = value
+        self._touch(rows[ok], cols[ok])
 
     def update(self, obs: dict, x: float, y: float, heading_deg: float) -> None:
         g = self.grid
-        # decays
+        # decays (fine and pooled copies decay together)
         np.subtract(g[C_ENEMY], np.minimum(g[C_ENEMY], 24), out=g[C_ENEMY])
         np.subtract(g[C_PROJ], np.minimum(g[C_PROJ], 128), out=g[C_PROJ])
+        p = self.pooled
+        np.subtract(p[C_ENEMY], np.minimum(p[C_ENEMY], 24), out=p[C_ENEMY])
+        np.subtract(p[C_PROJ], np.minimum(p[C_PROJ], 128), out=p[C_PROJ])
 
         h = math.radians(heading_deg)
         dist = obs["rays"]["distance"].astype(np.float64) * RAY_RANGE
@@ -89,6 +114,7 @@ class EgoMap:
         g[C_WALL, r, c] = 0  # opened doors / drift corrections
         g[C_DOOR, r, c] = 0
         g[C_LOCK, r, c] = 0
+        self._touch(r, c)
 
         # hit points
         hx = x + ca * (dist + 8.0)
@@ -120,9 +146,12 @@ class EgoMap:
             g[C_FREE, ar, ac] = 255
             r0, r1, c0, c1 = max(ar - 1, 0), ar + 2, max(ac - 1, 0), ac + 2
             g[C_ITEM, r0:r1, c0:c1] = 0  # picked up or not there anymore
+            self._touch(np.array([ar - 1, ar, ar + 1]), np.array([ac - 1, ac, ac + 1]))
         keys = obs["vitals"][8:14]
         if (keys > self.prev_keys).any() and 0 <= ar < SIZE and 0 <= ac < SIZE:
             g[C_KEY, max(ar - 3, 0):ar + 4, max(ac - 3, 0):ac + 4] = 0
+            rr, cc = np.meshgrid(np.arange(ar - 3, ar + 4), np.arange(ac - 3, ac + 4), indexing="ij")
+            self._touch(rr.ravel(), cc.ravel())
         self.prev_keys = keys.copy()
 
     def visits_here(self, x: float, y: float) -> int:
@@ -158,6 +187,6 @@ class EgoMap:
     def crops(self, x: float, y: float, heading_deg: float) -> tuple[np.ndarray, np.ndarray]:
         h = math.radians(heading_deg)
         fine = self._sample(self.grid, x, y, h, _FINE_OFF, FINE_RES)
-        pooled = self.grid.reshape(N_CH, SIZE // 4, 4, SIZE // 4, 4).max(axis=(2, 4))
-        coarse = self._sample(pooled, x, y, h, _COARSE_OFF, COARSE_RES)
+        self._refresh_pooled()
+        coarse = self._sample(self.pooled, x, y, h, _COARSE_OFF, COARSE_RES)
         return self._with_frontier(fine), self._with_frontier(coarse)

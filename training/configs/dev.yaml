@@ -1,0 +1,10 @@
+# tiny smoke-test config
+run_name: dev
+n_workers: 2
+envs_per_worker: 2
+rollout: 32
+seq_len: 16
+epochs: 1
+minibatches: 2
+total_steps: 1024
+ckpt_every: 100

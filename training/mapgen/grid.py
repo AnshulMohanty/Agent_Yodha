@@ -303,7 +303,8 @@ def _generate_once(rng, cfg: TierConfig, seed: int) -> MapSpec:
             pre = len(_bfs(grid, start, passable_now))
             grid[cell] = FLOOR
             sized.append((pre, cell))
-        good = [cell for pre, cell in sized if pre >= 0.3 * total and pre >= 25]
+        good = [cell for pre, cell in sized if pre >= 0.3 * total and pre >= 25
+                and not any(grid[cell[0] + dr, cell[1] + dc] in LOCKS for dr, dc in DIRS)]
         if not good:
             if i == 0:
                 raise GenerationError("no good gate")
@@ -327,6 +328,7 @@ def _generate_once(rng, cfg: TierConfig, seed: int) -> MapSpec:
         target = key_cell
     if cfg.locks[0] > 0 and not locks:
         raise GenerationError("tier needs locks but no gate found")
+    _separate_doors(grid)
 
     things: list[Thing] = [Thing(start[0], start[1], PLAYER_START, int(rng.integers(0, 8)) * 45, "player", "player")]
     occupied = {start} | {k for _, k in keys}
@@ -355,6 +357,26 @@ def _generate_once(rng, cfg: TierConfig, seed: int) -> MapSpec:
     ticks = int(rng.integers(cfg.episode_ticks[0], cfg.episode_ticks[1] + 1))
     ticks = int(round(ticks / 4) * 4)
     return MapSpec(grid, things, cfg.tier, seed, ticks, start, exit_cells, locks, keys, rooms)
+
+
+def _separate_doors(grid) -> None:
+    """A Doom door opens to its lowest neighbouring ceiling, so a door touching another closed door/lock
+    sector could never open. Turn plain doors that touch a different door/lock kind back into floor."""
+    H, W = grid.shape
+    changed = True
+    while changed:
+        changed = False
+        for r in range(H):
+            for c in range(W):
+                ch = grid[r, c]
+                if ch != DOOR:
+                    continue
+                for dr, dc in DIRS:
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < H and 0 <= nc < W and grid[nr, nc] in LOCKS:
+                        grid[r, c] = FLOOR
+                        changed = True
+                        break
 
 
 def _switch_access(grid, switch_cell) -> tuple[int, int]:
