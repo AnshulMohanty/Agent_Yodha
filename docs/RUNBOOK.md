@@ -70,15 +70,15 @@ A second background program (`training/eval/autopilot.py`) checks everything **e
 3. **Good:** the last line says **PASSED**. The CPU-limit and RAM lines show real numbers here, not warnings.
 4. Optional: also set **Settings → Codespaces → Default idle timeout = 240 minutes**.
 
-## 4. Timeline
+## 4. Timeline to the 10:00 AM deadline (27 Nov)
 | When | What | Who |
 |---|---|---|
-| Now → about 2 h | The student copies the coach (phase A, 3M steps) | Mac, automatic |
-| At about 3M steps | Claude publishes checkpoint `ckpt-A` and restarts the Mac in phase B (adds real Freedoom maps) | Claude |
-| Right after | Start Kaggle (section 2) | **You** |
-| Overnight | Both computers train. Claude tests checkpoints every couple of hours on held-out maps. | automatic |
-| Last 3 hours | Pick the best model, copy it to `submission/weights/`, validate, Codespaces docker check, brief PDF, push | Claude, plus you for the Codespaces check |
-| Last 30 minutes | Final push. Submit the repo link and brief PDF on the form. | **You** |
+| Now → 06:40 | The Mac trains (hard tier-4 maps now get about 35% of games). The autopilot checks every 2 h and pushes better models. | automatic |
+| About 05:30–06:30 | Kaggle finishes. Download `kaggle_export` from its **Output** tab into `runs/kaggle_b_export/` **before 06:40**, so it joins the final selection. | **You** |
+| 06:40 → about 07:15 | **Finalize, automatic:** stops training. Tests every recent model (plus averaged ones and Kaggle) on 24 maps. Then retests the best 3 on 60 new maps at 3 randomness settings. Installs the winner, validates, rebuilds the brief, pushes, records final videos. Report: `runs/FINAL_REPORT.md`. | automatic |
+| If Kaggle arrives late | `PYTHONPATH=. uv run python -m training.eval.finalize --quick runs/kaggle_b_export` (about 10 min). It replaces the submission only if Kaggle is better. | you or Claude |
+| 07:30 → 08:30 | Codespaces Docker check (section 3). Open `brief/brief.pdf` and `runs/videos/final_T3.mp4`. | **You** |
+| By 09:30 | Submit the repo link and `brief/brief.pdf` on the form. | **You** |
 
 ## 5. If something looks wrong
 | You see | It means | Do |
