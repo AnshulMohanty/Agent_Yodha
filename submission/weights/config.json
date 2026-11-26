@@ -2,7 +2,7 @@
  "hidden": 512,
  "use_pixels": true,
  "temperature": 0.7,
- "steps": 2752512,
- "source": "/Users/anshulmohanty/Hackathon/Agent_Yodha/runs/snaps/s2.75M",
- "heldout_proxy_score": 289.2
+ "steps": 2654208,
+ "source": "runs/snap_2p6M",
+ "heldout_proxy_score": 378.2
 }
