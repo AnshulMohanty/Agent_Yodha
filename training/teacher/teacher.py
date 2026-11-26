@@ -183,6 +183,9 @@ class Teacher:
             p = self._bfs(me, keys_held, lambda c: c in self.items_seen)
             if p and len(p) <= 4:
                 plans.append(("pickup", p))
+            weapons = self._bfs(me, keys_held, lambda c: c in self.items_seen and self.items_seen[c] == 8)
+            if weapons and len(weapons) <= 10:
+                plans.append(("pickup", weapons))
         if not plans:
             self.path, self.target, self.intent = [], None, INTENT["explore"]
             return
@@ -249,10 +252,17 @@ class Teacher:
                 self.strafe_dir = -self.strafe_dir
                 self.strafe_t = int(self.rng.integers(4, 10))
             a[2 if self.strafe_dir > 0 else 3] = 1
-            if int(ent["entity_type"][k]) == 1 and dist < 250:
+            # back off from melee enemies, and from everything when badly hurt or outnumbered
+            n_close = sum(1 for j in enemies if ent["features"][j][0] * 1024 < 600)
+            if (int(ent["entity_type"][k]) == 1 and dist < 250) or (health < 35 and dist < 700) or n_close >= 3:
                 a[1] = 1
             if obs["vitals"][3] <= 0:
                 a[8] = 1 if self.rng.random() < 0.3 else 0
+            # dodge incoming projectiles harder
+            proj = [j for j in np.flatnonzero(ent["mask"]) if int(ent["entity_type"][j]) == PROJ_T
+                    and ent["features"][j][0] * 1024 < 350]
+            if proj:
+                a[2], a[3] = (1, 0) if self.strafe_dir > 0 else (0, 1)
             self.prev_use = 0
             return a, INTENT["fight"]
 

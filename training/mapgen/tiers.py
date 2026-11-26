@@ -46,7 +46,7 @@ HARD_MIX = {"zombieman": 2, "shotgunguy": 3, "imp": 3, "demon": 2, "chaingunner"
             "spectre": 1, "cacodemon": 1, "hellknight": 0.5}
 ITEM_MIX = {"stimpack": 3, "medikit": 1.5, "clip": 3, "shells": 2, "greenarmor": 0.7, "shotgun": 1,
             "ammobox": 0.5, "shellbox": 0.5, "chaingun": 0.4, "barrel": 0.6, "bluearmor": 0.2}
-SCARCE_ITEMS = {"stimpack": 2, "clip": 2, "shells": 1.5, "shotgun": 0.7, "medikit": 0.5, "barrel": 0.8}
+SCARCE_ITEMS = {"stimpack": 2.5, "clip": 2, "shells": 1.5, "shotgun": 1.5, "medikit": 0.7, "greenarmor": 0.5, "barrel": 0.8}
 
 TIERS: dict[int, TierConfig] = {
     1: TierConfig(1, (12, 20), (1, 3), (4, 9), 0.3, 0.2, (0, 0), (3, 9), EASY_MIX, (3, 7), ITEM_MIX,
@@ -55,6 +55,6 @@ TIERS: dict[int, TierConfig] = {
                   episode_ticks=(2800, 3500)),
     3: TierConfig(3, (22, 38), (6, 11), (3, 8), 0.2, 0.4, (1, 2), (3, 9), MID_MIX, (4, 9), ITEM_MIX,
                   episode_ticks=(3500, 4200)),
-    4: TierConfig(4, (26, 44), (8, 14), (3, 8), 0.2, 0.45, (2, 3), (8, 18), HARD_MIX, (3, 7), SCARCE_ITEMS,
+    4: TierConfig(4, (26, 44), (8, 14), (3, 8), 0.2, 0.45, (2, 3), (6, 14), HARD_MIX, (4, 8), SCARCE_ITEMS,
                   ambush_prob=0.4, episode_ticks=(4200, 4200)),
 }
