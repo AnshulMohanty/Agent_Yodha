@@ -2,5 +2,7 @@
  "hidden": 512,
  "use_pixels": true,
  "temperature": 0.7,
- "source": "mac_main @0.3M steps (safety submission)"
+ "steps": 2752512,
+ "source": "/Users/anshulmohanty/Hackathon/Agent_Yodha/runs/snaps/s2.75M",
+ "heldout_proxy_score": 289.2
 }
