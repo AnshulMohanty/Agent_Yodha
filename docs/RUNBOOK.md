@@ -27,6 +27,22 @@ pgrep -f kickstart_ppo
 ```
 Numbers printed means it's running. Nothing printed means it stopped; tell Claude.
 
+### Autopilot: no need to ask Claude every few hours
+A second background program (`training/eval/autopilot.py`) checks everything **every 2 hours** by itself:
+- tests the newest model on the same unseen maps,
+- records 2 videos,
+- **pushes the new model to GitHub if it scores clearly better** (only after `validate.py` passes),
+- restarts training if it stopped,
+- shows a Mac notification.
+
+| To | Do |
+|---|---|
+| Read the report | Open `runs/STATUS.md` (plain language: what it can do per level type, score history) |
+| Watch the latest videos | `open runs/videos/latest_T1.mp4` (fight) and `open runs/videos/latest_T3.mp4` (key, then locked door, then exit) |
+| Watch a fresh video right now | `scripts/preview.sh 3` (any tier 1–4; takes about 1 min, then the video opens) |
+| Check the autopilot is alive | `pgrep -f training.eval.autopilot` |
+| Stop the autopilot | `pkill -f training.eval.autopilot` |
+
 ## 2. Kaggle: a second computer training for free (do this when Claude says "ckpt-A is published")
 1. Go to kaggle.com, click your picture, then **Settings**. Verify your **phone number** (one time only).
 2. Click **Create → New Notebook**.

@@ -45,25 +45,37 @@ def main() -> None:
         raise SystemExit("no valid candidates")
     s, c, t = best
     print(f"\nBEST: {c} temperature {t} score {s['weighted_score']:.1f}")
+    install(s, c, t, a.push)
+
+
+def install(s: dict, c: Path, t: float, push: bool) -> bool:
+    """Copy export dir c into submission/weights with temperature t, validate, rebuild the brief, optionally push."""
     dst = ROOT / "submission" / "weights"
+    backup = {f: (dst / f).read_bytes() for f in ("yodha.pt", "config.json")}
     shutil.copy(c / "yodha.pt", dst / "yodha.pt")
     cfg = json.loads((c / "config.json").read_text()) if (c / "config.json").exists() else {}
-    cfg.update({"temperature": t, "source": str(c), "heldout_proxy_score": round(s["weighted_score"], 1)})
+    c = Path(c).resolve()
+    src = str(c.relative_to(ROOT)) if c.is_relative_to(ROOT) else c.name
+    cfg.update({"temperature": t, "source": src, "heldout_proxy_score": round(s["weighted_score"], 1)})
     (dst / "config.json").write_text(json.dumps(cfg, indent=1))
-    (ROOT / "runs" / "eval").mkdir(parents=True, exist_ok=True)
-    (ROOT / "runs" / "eval" / "agent.json").write_text(json.dumps(s, indent=1, default=float))
     v = subprocess.run(["uv", "run", "python", "validate.py"], cwd=ROOT, capture_output=True, text=True)
     print(v.stdout[-800:])
     if "PASSED" not in v.stdout:
-        raise SystemExit("validate.py did not pass: NOT pushing")
+        for f, b in backup.items():
+            (dst / f).write_bytes(b)
+        print("validate.py did not pass: previous submission restored, NOT pushing")
+        return False
+    (ROOT / "runs" / "eval").mkdir(parents=True, exist_ok=True)
+    (ROOT / "runs" / "eval" / "agent.json").write_text(json.dumps(s, indent=1, default=float))
     subprocess.run(["uv", "run", "python", "brief/make_brief.py"], cwd=ROOT, check=False)
-    if a.push:
+    if push:
         subprocess.run(["git", "add", "submission/weights", "brief"], cwd=ROOT, check=True)
         msg = (f"Promote {c.name} (T={t}): held-out proxy score {s['weighted_score']:.0f}\n\n"
                "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>")
         subprocess.run(["git", "commit", "-m", msg], cwd=ROOT, check=True)
         subprocess.run(["git", "push", "origin", "main"], cwd=ROOT, check=True)
         print("pushed")
+    return True
 
 
 if __name__ == "__main__":
