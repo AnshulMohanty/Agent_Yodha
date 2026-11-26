@@ -42,7 +42,9 @@ class YodhaPolicy:
     @torch.inference_mode()
     def act(self, obs: dict) -> np.ndarray:
         inp = self.memory.observe(obs)
-        self.h, _, logits = self.net.forward_step(to_batch(inp, self.device), self.h)
+        self.h, intent_logits, logits = self.net.forward_step(to_batch(inp, self.device), self.h)
+        self.last = {"inp": inp, "intent": torch.softmax(intent_logits[0].float(), -1).cpu().numpy(),
+                     "heads": [torch.softmax(lg[0].float(), -1).cpu().numpy() for lg in logits]}
         idx = []
         for lg in logits:
             p = lg[0].float()

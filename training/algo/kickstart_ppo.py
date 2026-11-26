@@ -36,7 +36,7 @@ DEFAULTS = dict(
     max_grad=0.5, total_steps=60_000_000, device="auto", hidden=512, use_pixels=True,
     phase_a_end=6_000_000, phase_b_end=25_000_000, beta_start=0.5, final_ks=0.05, intent_coef=0.5,
     aux_coef=0.2, ckpt_every=10, seed=0, init_ckpt=None, tier_weights=[0.3, 0.3, 0.25, 0.15], max_hours=100.0,
-    reset_optimizer=False,
+    reset_optimizer=False, real_map_prob=0.1,
 )
 
 
@@ -151,6 +151,8 @@ def train(cfg: dict) -> None:
         AUXE = np.zeros((T, E), np.float32)
         AUXD = np.zeros((T, E), np.float32)
         AUXF = np.zeros((T, E), np.int64)
+        HT = np.zeros((T, E), np.float32)
+        vec.set_options({"real_map_prob": cfg["real_map_prob"] if sch["phase"] != "A" else 0.0})
         episodes = []
         t_roll = time.time()
         tm_inf = tm_env = 0.0
@@ -158,6 +160,7 @@ def train(cfg: dict) -> None:
         for t in range(T):
             if t % 16 == 0:
                 beta_mask = np.random.rand(E) < sch["beta"]
+            beta_mask = beta_mask & (ex["has_teacher"] > 0.5)
             _t0 = time.perf_counter()
             for k in buf:
                 buf[k][t] = inp[k]
@@ -182,6 +185,7 @@ def train(cfg: dict) -> None:
             BYT[t] = beta_mask
             INT[t], PRIV[t] = ex["intent"], ex["priv"]
             AUXE[t], AUXD[t], AUXF[t] = ex["aux_exit"], ex["aux_door"], ex["aux_dir"]
+            HT[t] = ex["has_teacher"]
             buttons = factored_to_buttons(torch.from_numpy(execd_np)).numpy()
             _t1 = time.perf_counter()
             inp, rew, done, ex, eps = vec.step(buttons)
@@ -257,16 +261,20 @@ def train(cfg: dict) -> None:
                 pg = torch.max(-advn * ratio, -advn * ratio.clamp(1 - cfg["clip"], 1 + cfg["clip"]))
                 pg_loss = (pg * student_mask).sum() / student_mask.sum().clamp(min=1)
                 v_loss = 0.5 * ((value - rets) ** 2).mean()
-                ks = sum(F.cross_entropy(lg.reshape(-1, lg.shape[-1]).float(), tea[..., i].reshape(-1))
-                         for i, lg in enumerate(logits))
+                ht = gather(HT).reshape(-1)
+                n_ht = ht.sum().clamp(min=1)
+                ks = sum((F.cross_entropy(lg.reshape(-1, lg.shape[-1]).float(), tea[..., i].reshape(-1), reduction="none")
+                          * ht).sum() / n_ht for i, lg in enumerate(logits))
                 il = outs_int[0]
-                int_loss = F.cross_entropy(il.reshape(-1, il.shape[-1]).float(), gather(INT).reshape(-1))
+                int_loss = (F.cross_entropy(il.reshape(-1, il.shape[-1]).float(), gather(INT).reshape(-1), reduction="none")
+                            * ht).sum() / n_ht
                 aux_e = aux_all["exit_visible"].squeeze(-1)
                 aux_d = aux_all["door_ahead"].squeeze(-1)
                 aux_f = aux_all["frontier_dir"]
-                aux_loss = (F.binary_cross_entropy_with_logits(aux_e.float(), gather(AUXE))
+                auxf_t = torch.where(ht.reshape(aux_f.shape[:2]) > 0.5, gather(AUXF), torch.full_like(gather(AUXF), -1))
+                aux_loss = ((F.binary_cross_entropy_with_logits(aux_e.float(), gather(AUXE), reduction="none").reshape(-1) * ht).sum() / n_ht
                             + F.binary_cross_entropy_with_logits(aux_d.float(), gather(AUXD))
-                            + F.cross_entropy(aux_f.reshape(-1, 8).float(), gather(AUXF).reshape(-1), ignore_index=-1))
+                            + F.cross_entropy(aux_f.reshape(-1, 8).float(), auxf_t.reshape(-1), ignore_index=-1))
                 if torch.isnan(aux_loss):
                     aux_loss = torch.zeros((), device=device)
                 ent_m = ent.mean()
@@ -277,7 +285,8 @@ def train(cfg: dict) -> None:
                 torch.nn.utils.clip_grad_norm_(net.parameters(), cfg["max_grad"])
                 opt.step()
                 with torch.no_grad():
-                    agree = torch.stack([(lg.argmax(-1) == tea[..., i]).float().mean() for i, lg in enumerate(logits)]).mean()
+                    htm = gather(HT) > 0.5
+                    agree = torch.stack([(lg.argmax(-1) == tea[..., i])[htm].float().mean() for i, lg in enumerate(logits)]).mean()
                     stats["pg"].append(pg_loss.item())
                     stats["v"].append(v_loss.item())
                     stats["ks"].append(ks.item())
@@ -292,14 +301,15 @@ def train(cfg: dict) -> None:
         for epi in episodes:
             ep_hist[int(epi["tier"])].append(epi)
         line = []
-        for tier in (1, 2, 3, 4):
+        for tier in (1, 2, 3, 4, 5):
             hist = ep_hist[tier]
             if not hist:
                 continue
             m = {k: float(np.mean([e[k] for e in hist])) for k in ("exit", "dead", "coverage", "return")}
             keys = sum(e["keys"] for e in hist) / max(1.0, sum(e["n_keys"] for e in hist))
             kills = sum(e["kills"] for e in hist) / max(1.0, sum(e["monsters"] for e in hist))
-            tier_success[tier - 1] = m["exit"]
+            if tier <= 4:
+                tier_success[tier - 1] = m["exit"]
             line.append(f"T{tier} exit {m['exit']:.2f} dead {m['dead']:.2f} keys {keys:.2f} kills {kills:.2f} cov {m['coverage']:.2f}")
             if writer:
                 for k, v in dict(m, keys=keys, kills=kills).items():

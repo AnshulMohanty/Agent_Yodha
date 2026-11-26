@@ -18,6 +18,7 @@ from submission.yodha.features import INPUT_SPECS
 EXTRA_SPECS = {
     "priv": ((16,), np.float32), "teacher": ((9,), np.int8), "intent": ((), np.int64),
     "aux_exit": ((), np.float32), "aux_door": ((), np.float32), "aux_dir": ((), np.int64),
+    "has_teacher": ((), np.float32),
 }
 ALL_SPECS = {**INPUT_SPECS, **EXTRA_SPECS}
 
@@ -78,6 +79,10 @@ def _worker(remote, env_ids, seed, tier_weights, teacher, shm_names):
                 for e in envs:
                     e.set_tier_weights(data)
                 remote.send(True)
+            elif cmd == "options":
+                for e in envs:
+                    e.set_options(data)
+                remote.send(True)
             elif cmd == "close":
                 for e in envs:
                     e.close()
@@ -135,6 +140,12 @@ class VecYodha:
     def set_tier_weights(self, w) -> None:
         for r in self.remotes:
             r.send(("tiers", list(map(float, w))))
+        for r in self.remotes:
+            r.recv()
+
+    def set_options(self, opts: dict) -> None:
+        for r in self.remotes:
+            r.send(("options", opts))
         for r in self.remotes:
             r.recv()
 

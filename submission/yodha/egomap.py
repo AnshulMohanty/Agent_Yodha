@@ -132,8 +132,10 @@ class EgoMap:
             f = ent["features"][m]
             et = ent["entity_type"][m]
             d = f[:, 0] * RAY_RANGE
-            ea = h + np.arctan2(f[:, 1], f[:, 2])
-            er, ec = self._cell(x + np.cos(ea) * d, y + np.sin(ea) * d)
+            # rotate the ego offset (d*cos_rel, d*sin_rel) into the world frame (pure geometry)
+            ch_, sh_ = math.cos(h), math.sin(h)
+            ox, oy = d * f[:, 2], d * f[:, 1]
+            er, ec = self._cell(x + ox * ch_ - oy * sh_, y + ox * sh_ + oy * ch_)
             for types, ch in ((ENEMY_TYPES, C_ENEMY), ((PROJ_TYPE,), C_PROJ), (ITEM_TYPES, C_ITEM), ((KEY_TYPE,), C_KEY)):
                 sel = np.isin(et, types)
                 if sel.any():

@@ -15,6 +15,8 @@ from pathlib import Path
 
 import numpy as np
 
+import vizdoom
+
 from doom_env import make_env
 from submission.yodha.features import AgentMemory
 from training.mapgen.grid import generate
@@ -24,6 +26,8 @@ from training.teacher.teacher import INTENT, Teacher
 warnings.filterwarnings("ignore")
 ODO = Path(__file__).resolve().parents[2] / "submission" / "weights" / "odometry.json"
 PRIV_DIM = 16
+FREEDOOM2 = os.path.join(os.path.dirname(vizdoom.__file__), "freedoom2.wad")
+REAL_MAPS = [f"MAP{i:02d}" for i in range(1, 33)]
 REWARD = dict(exit=10.0, exit_health=2.0, exit_time=2.0, key=3.0, door=1.0, lock=4.0, cell=0.05, sector=0.3,
               kill=1.0, damage=-0.01, death=-5.0, time=-0.001, stuck=-0.02, use_spam=-0.02, shaping=0.02)
 
@@ -42,9 +46,14 @@ class YodhaEnv:
         self.episode = 0
         self.map_uses = 0
         self.tier = 1
+        self.real_map_prob = 0.0
+        self.spec = None
 
     def set_tier_weights(self, w) -> None:
         self.tier_weights = np.asarray(w, np.float64)
+
+    def set_options(self, opts: dict) -> None:
+        self.real_map_prob = float(opts.get("real_map_prob", self.real_map_prob))
 
     # ------------------------------------------------------------------ episode
     EPISODES_PER_MAP = 4  # re-use a map (new monster RNG seed) to amortize engine start-up
@@ -54,21 +63,34 @@ class YodhaEnv:
         if self.env is None or self.map_uses >= self.EPISODES_PER_MAP:
             if self.env is not None:
                 self.env.close()
-            tier = int(self.rng.choice(4, p=self.tier_weights / self.tier_weights.sum())) + 1
-            self.spec = generate(tier, seed)
-            path = write_map(self.spec, self.workdir / f"ep{self.episode % 2}.wad", self.rng)
-            self.env = make_env(str(path), "MAP01", episode_ticks=self.spec.episode_ticks)
+            if self.rng.random() < self.real_map_prob:
+                # real hand-made Freedoom 2 level (no teacher; RL only) for geometry beyond our grid maps
+                self.spec = None
+                self.env = make_env(FREEDOOM2, str(self.rng.choice(REAL_MAPS)), episode_ticks=4200)
+                self.tier = 5
+            else:
+                tier = int(self.rng.choice(4, p=self.tier_weights / self.tier_weights.sum())) + 1
+                self.spec = generate(tier, seed)
+                path = write_map(self.spec, self.workdir / f"ep{self.episode % 2}.wad", self.rng)
+                self.env = make_env(str(path), "MAP01", episode_ticks=self.spec.episode_ticks)
+                self.tier = tier
             self.map_uses = 0
-            self.tier = tier
         obs, _ = self.env.reset(seed=seed % (2**31))
         self.map_uses += 1
         self.episode += 1
         tier = self.tier
-        self.sid, _ = _sectors(self.spec.grid)
-        self.teacher = Teacher(self.spec, self.rng) if self.use_teacher else None
         self.memory.reset()
-        self.n_monsters = sum(1 for t in self.spec.things if t.kind == "monster")
-        self.floor_cells = max(1, int((self.spec.grid != "#").sum()))
+        if self.spec is not None:
+            self.sid, _ = _sectors(self.spec.grid)
+            self.teacher = Teacher(self.spec, self.rng) if self.use_teacher else None
+            self.n_monsters = sum(1 for t in self.spec.things if t.kind == "monster")
+            self.floor_cells = max(1, int((self.spec.grid != "#").sum()))
+            self.ticks = self.spec.episode_ticks
+            self.n_locks = len(self.spec.locks)
+            n_keys = len(self.spec.keys)
+        else:
+            self.sid, self.teacher = None, None
+            self.n_monsters, self.floor_cells, self.ticks, self.n_locks, n_keys = 1, 2000, 4200, 0, 0
         st = self.env.privileged_state()
         self.prev_st = st
         self.cells_seen = {self._cell128(st)}
@@ -76,7 +98,7 @@ class YodhaEnv:
         self.doors_opened = set()
         self.stuck = 0
         self.ep_return = 0.0
-        self.ep_stats = dict(tier=tier, exit=0.0, keys=0.0, n_keys=float(len(self.spec.keys)), doors=0.0, locks=0.0,
+        self.ep_stats = dict(tier=tier, exit=0.0, keys=0.0, n_keys=float(n_keys), doors=0.0, locks=0.0,
                              kills=0.0, monsters=float(self.n_monsters), dead=0.0, coverage=0.0, steps=0.0)
         self.obs = obs
         self.phi = 0.0
@@ -87,6 +109,8 @@ class YodhaEnv:
         return int(st["x"] // 128), int(st["y"] // 128)
 
     def _sector(self, st) -> int:
+        if self.sid is None:
+            return -1
         r, c = int(st["y"] // 64), int(st["x"] // 64)
         if 0 <= r < self.sid.shape[0] and 0 <= c < self.sid.shape[1]:
             return int(self.sid[r, c])
@@ -95,7 +119,7 @@ class YodhaEnv:
     # ------------------------------------------------------------------ teacher / labels
     def _extras(self, obs, st) -> dict:
         ex = {"priv": np.zeros(PRIV_DIM, np.float32), "teacher": np.zeros(9, np.int8), "intent": 0,
-              "aux_exit": 0.0, "aux_door": 0.0, "aux_dir": -1}
+              "aux_exit": 0.0, "aux_door": 0.0, "aux_dir": -1, "has_teacher": float(self.teacher is not None)}
         if self.teacher is not None:
             a, intent = self.teacher.act(obs, st)
             ex["teacher"], ex["intent"] = a, intent
@@ -114,9 +138,9 @@ class YodhaEnv:
         p[3] = min(-self.phi, 60.0) / 60.0
         p[4 + int(ex["intent"])] = 1.0
         p[10] = float(getattr(self.teacher, "exit_known", False))
-        p[11] = (len(self.spec.locks) - sum(1 for _, lock in self.doors_opened if lock > 0)) / 3.0
+        p[11] = (self.n_locks - sum(1 for _, lock in self.doors_opened if lock > 0)) / 3.0
         p[12] = st["kills"] / max(1, self.n_monsters)
-        p[13] = st["tic"] / max(1, self.spec.episode_ticks)
+        p[13] = st["tic"] / max(1, self.ticks)
         p[14] = self.tier / 4.0
         return ex
 
@@ -129,7 +153,7 @@ class YodhaEnv:
         R = REWARD
         r = R["time"]
         if info.get("exit_reached"):
-            r += R["exit"] + R["exit_health"] * max(st["health"], 0) / 100.0 + R["exit_time"] * (1 - st["tic"] / self.spec.episode_ticks)
+            r += R["exit"] + R["exit_health"] * max(st["health"], 0) / 100.0 + R["exit_time"] * (1 - st["tic"] / self.ticks)
             self.ep_stats["exit"] = 1.0
         new_keys = float((st["keys"] > 0).sum() - (prev["keys"] > 0).sum())
         if new_keys > 0:
@@ -168,7 +192,8 @@ class YodhaEnv:
             self.teacher.prev_use = int(action[7])
         if done:
             self.ep_stats["kills"] = float(st["kills"])
-            self.ep_stats["coverage"] = len(self.sectors_seen) / max(1, int(self.sid.max()) + 1)
+            self.ep_stats["coverage"] = (len(self.sectors_seen) / max(1, int(self.sid.max()) + 1) if self.sid is not None
+                                         else len(self.cells_seen) / 200.0)
             self.ep_stats["steps"] = float(self.memory.step)
             stats = dict(self.ep_stats)
             self.ep_return += r
