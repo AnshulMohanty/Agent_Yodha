@@ -2,7 +2,7 @@
  "hidden": 512,
  "use_pixels": true,
  "temperature": 0.7,
- "steps": 6291456,
- "source": "runs/snaps/s6.29M",
- "heldout_proxy_score": 656.2
+ "steps": 12976128,
+ "source": "runs/snaps/s12.98M",
+ "heldout_proxy_score": 776.0
 }
