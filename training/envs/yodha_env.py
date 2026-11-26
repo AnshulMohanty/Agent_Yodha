@@ -29,7 +29,9 @@ PRIV_DIM = 16
 FREEDOOM2 = os.path.join(os.path.dirname(vizdoom.__file__), "freedoom2.wad")
 REAL_MAPS = [f"MAP{i:02d}" for i in range(1, 33)]
 REWARD = dict(exit=10.0, exit_health=2.0, exit_time=2.0, key=3.0, door=1.0, lock=4.0, cell=0.05, sector=0.3,
-              kill=1.0, damage=-0.01, death=-5.0, time=-0.001, stuck=-0.02, use_spam=-0.02, shaping=0.02)
+              kill=1.0, damage=-0.02, death=-8.0, time=-0.001, stuck=-0.02, use_spam=-0.02, shaping=0.02)
+# 27 Nov 05:30 survival push: damage -0.01 -> -0.02 per HP, death -5 -> -8. Before, a full health bar cost the
+# same as one kill paid, so the policy traded health for kills and died mid-level on tier 4 (deaths flat ~57%).
 
 
 class YodhaEnv:

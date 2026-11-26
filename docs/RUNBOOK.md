@@ -73,11 +73,13 @@ A second background program (`training/eval/autopilot.py`) checks everything **e
 ## 4. Timeline to the 10:00 AM deadline (27 Nov)
 | When | What | Who |
 |---|---|---|
-| Now → 06:40 | The Mac trains (hard tier-4 maps now get about 35% of games). The autopilot checks every 2 h and pushes better models. | automatic |
-| About 05:30–06:30 | Kaggle finishes. Download `kaggle_export` from its **Output** tab into `runs/kaggle_b_export/` **before 06:40**, so it joins the final selection. | **You** |
-| 06:40 → about 07:15 | **Finalize, automatic:** stops training. Tests every recent model (plus averaged ones and Kaggle) on 24 maps. Then retests the best 3 on 60 new maps at 3 randomness settings. Installs the winner, validates, rebuilds the brief, pushes, records final videos. Report: `runs/FINAL_REPORT.md`. | automatic |
-| If Kaggle arrives late | `PYTHONPATH=. uv run python -m training.eval.finalize --quick runs/kaggle_b_export` (about 10 min). It replaces the submission only if Kaggle is better. | you or Claude |
-| 07:30 → 08:30 | Codespaces Docker check (section 3). Open `brief/brief.pdf` and `runs/videos/final_T3.mp4`. | **You** |
+| Now → 07:45 | The Mac trains with a **tier-4 survival push** (since 05:30): tier 4 gets about half the games, the learning rate is back up, dying and losing health cost more. The autopilot checks at about 06:55. | automatic |
+| About 05:45–06:30 | Kaggle finishes. Download `kaggle_export` from its **Output** tab into `runs/kaggle_b_export/` **before 07:45**, so it joins the final selection. | **You** |
+| About 06:55 | Halfway check: if tiers 1–3 got worse, Claude reverts to the 05:03 settings for the last hour. | Claude |
+| 07:00 → 07:40 | Codespaces Docker check (section 3) on the current submission. It tests the machine setup, so it stays valid after finalize. | **You** |
+| 07:45 → about 08:25 | **Finalize, automatic:** stops training. Tests every recent model (plus averaged ones and Kaggle) on 24 maps. Then retests the best 3 on 60 new maps at 3 randomness settings. Installs the winner, validates, rebuilds the brief, pushes, records final videos. Report: `runs/FINAL_REPORT.md`. | automatic |
+| If Kaggle arrives late | `PYTHONPATH=. uv run python -m training.eval.finalize --now --quick runs/kaggle_b_export` (about 10 min). It replaces the submission only if Kaggle is better. | you or Claude |
+| About 08:30 | Tell Claude "check final". Quick re-check in Codespaces: `git pull && git lfs pull && uv run python validate.py --docker`. Open `brief/brief.pdf` and `runs/videos/final_T3.mp4`. | **You** |
 | By 09:30 | Submit the repo link and `brief/brief.pdf` on the form. | **You** |
 
 ## 5. If something looks wrong
