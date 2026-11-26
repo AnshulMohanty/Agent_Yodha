@@ -1,0 +1,6 @@
+{
+ "hidden": 512,
+ "use_pixels": true,
+ "temperature": 0.7,
+ "source": "mac_main @0.3M steps (safety submission)"
+}
