@@ -1,88 +1,81 @@
-# devforge-doom-template
+# YODHA: a DOOM agent that remembers, explores and finishes levels
 
-Starter template for **Yugaantar 2026 · DevForge — Track 1: "Can It Play DOOM?"**
+**Yugaantar 2026 · DevForge, Track 1 "Can It Play DOOM?"**. Built from the official
+[devforge-doom-template](https://github.com/Reinforce-SST/devforge-doom-template).
 
-> For decades, *"Can it run DOOM?"* was the ultimate hardware test. Now: **can your neural network
-> actually play DOOM?** Train an agent that plays unseen levels **zero-shot**: survive ambushes,
-> navigate multi-room layouts, find keycards, unlock doors and reach the exit.
+YODHA ("warrior") is a recurrent neural agent. It plays **unseen** DOOM levels using only the official
+ego-centric observations: rays, entities, vitals and a small pixel view. It builds its own spatial memory as it plays.
 
-No dataset is provided. Your agent learns by interacting with the engine.
+| What makes it different | Why it matters for the score |
+|---|---|
+| **EgoMap memory.** A two-scale egocentric semantic map built from the 64 rays and the agent's own calibrated odometry (walls, doors, locked doors, keys, items, enemies, visited cells, frontier). | Remembers where the locked door was and which areas are explored, so it backtracks with a key instead of looping. |
+| **Honest privileged teacher, then kickstarted PPO.** A training-only teacher sees the true map but only *knows* what the agent has observed. The student is DAgger-distilled from it, then improved with PPO. | Gets long-horizon key → locked door → exit behaviour in millions of steps instead of billions. |
+| **Procedural maps in the organizers' own format.** UDMF grid maps with the same door, lock and exit specials as the template fixtures, plus real Freedoom 2 levels. | Trains for zero-shot generalisation across tiers, not memorisation. |
+| **Entity set-attention + pixel CNN.** | Any number of enemies; sees exits (GATE floors, exit switches) that rays cannot. |
+| **Intent head (hierarchical control).** explore / fight / get key / open door / go to exit / pickup, FiLM-conditioning the action heads. | Interpretable decisions (see the glass-box videos). |
+| **Scorer-aligned reward.** Exit, keys, doors, unlocks, new sectors, kills, damage and death, computed from privileged state during training only. | Optimises the categories the judges score. |
 
-## Quickstart
-
-1. Click **"Use this template"** on GitHub to create your team's (public) repository.
-2. Set up the environment (Python 3.13, [uv](https://docs.astral.sh/uv/)):
-
-   ```bash
-   uv sync                 # installs vizdoom, gymnasium and the official wrapper (env/) in editable mode
-   uv run python validate.py
-   ```
-
-   Or use the official image, which is exactly what the scorer runs:
-
-   ```bash
-   docker build -t devforge-doom .            # or: docker pull <official image tag, announced>
-   python validate.py --docker --image devforge-doom   # installs requirements.txt, then runs sandboxed like the scorer
-   ```
-
-3. Replace the random baseline in `submission/agent.py` with your trained agent.
-4. Put weights in `submission/weights/` (Git LFS) and training code in `training/`.
-5. Run `python validate.py --docker` and submit your repo URL.
-
-**Platforms:** Linux (x86-64/ARM), macOS on Apple Silicon (macOS 15+) and Windows (x86-64) all
-work with `uv sync` and `validate.py`. Intel Macs have no `vizdoom` 1.3.3 wheel: use Docker or a
-Linux machine. Evaluation runs on Linux, so `validate.py --docker` is the closest check.
-
-## Repository layout
-
+## Architecture
 ```
-env/                  official ViZDoom Gymnasium wrapper (doom_env): spaces, sensors, protocol, limits
-maps/                 one small test map (NOT an evaluation map); bring your own for training
-submission/agent.py   your DoomAgent: the evaluation entry point
-submission/weights/   model weights (Git LFS)
-training/             your training pipeline
-validate.py           run before submitting
-tests/                tests for the wrapper and validator (uv run pytest)
-docs/                 contract, rules, submission guide, evaluation details
+obs ─┬─ rays (64×[dist, hit-type, Δdist]) ──► circular Conv1d ───────────────┐
+     ├─ visible_entities (≤32) ─────────────► MLP + set-attention (2 queries) ┤
+     ├─ vitals + self-history ──────────────► MLP                             ├─► Linear ─► GRU(512) ─┬─► intent head (6) ─┐
+     ├─ rgb+depth 60×80 ────────────────────► CNN                             │                       │       FiLM ◄────────┘
+     └─ odometry ─► EgoMap 320×320×9 world grid ─► fine 64×64 crop ─► CNN ────┤                       └─► 6 factorized action heads
+                                                 coarse 32×32 crop ─► CNN ────┘                           (move/strafe/turn/attack/use/weapon → 9 buttons)
+training only: value head with privileged critic features, auxiliary heads (exit in view, door ahead, frontier direction)
+```
+About 4.6M parameters, about 5 ms per decision on **one CPU thread** (budget 40 ms). `validate.py` passes.
+
+## Repository
+```
+submission/agent.py         DoomAgent (evaluation entry point)
+submission/yodha/           inference package: odometry, egomap, features, model, policy (numpy + torch only)
+submission/weights/         yodha.pt (Git LFS), config.json, odometry.json
+training/mapgen/            procedural tiered maps → UDMF WADs (organizer format) + solvability check
+training/teacher/           honest privileged teacher (training only: grid BFS + aiming live here, never in submission/)
+training/envs/              shaped-reward training env + shared-memory multiprocess workers
+training/algo/              kickstarted recurrent PPO (our implementation)
+training/calib/             odometry calibration
+training/eval/harness.py    scorer replica on held-out maps (tier-weighted proxy score)
+training/viz/glassbox.py    video: game + EgoMap + intent/action probabilities
+training/cloud/             Kaggle runner
+tests/                      official tests + mapgen, rules audit, agent contract
+docs/                       contract/rules (official), TRACK1_MASTER_PLAN.md, FACTS.md, RUNBOOK.md
 ```
 
-## Using the environment
-
-```python
-from doom_env import make_env
-
-env = make_env("maps/two_rooms.wad")     # test map; use your own maps for training
-obs, info = env.reset(seed=0)
-obs, reward, terminated, truncated, info = env.step(env.action_space.sample())
+## Run it
+```bash
+uv sync --all-groups                      # Python 3.13, vizdoom 1.3.3, torch 2.15 (same as the official image)
+uv run python validate.py                 # official checks
+uv run pytest -q tests/                   # official + our tests
+```
+Training (Mac / any machine):
+```bash
+PYTHONPATH=. uv run python -m training.calib.odometry_calibrate                         # fit odometry (once)
+PYTHONPATH=. uv run python -m training.teacher.run_teacher --maps 10                     # teacher sanity check
+PYTHONPATH=. uv run python -m training.algo.kickstart_ppo --config training/configs/mac.yaml
+PYTHONPATH=. uv run python -m training.eval.harness --weights runs/mac_main/export --maps 8
+PYTHONPATH=. uv run python -m training.viz.glassbox --weights runs/mac_main/export --tier 3 --out runs/videos/t3.mp4
 ```
 
-Observations are a dict of `rgb`, `depth`, `vitals`, `rays` and `visible_entities`, all
-ego-centric and partially observable. See [docs/CONTRACT.md](docs/CONTRACT.md).
-The wrapper's `reward` is a basic default for convenience. Shape your own reward for training.
+## Rules compliance
+- Every action comes from YodhaNet's trained parameters (`submission/yodha/policy.py`, argmax or sampling over the heads).
+- **No** rule trees, path planners or aimbots in `submission/`. `tests/test_audit.py` enforces it: no BFS/A*/Dijkstra/heapq/deque search, no atan2, no imports from `training/`.
+- EgoMap and odometry are observation preprocessing plus memory. Nothing plans on them; they're inputs to the CNN.
+- The privileged teacher, map knowledge and privileged reward are **training-time scaffolding only** (allowed by docs/RULES.md §1–2).
+- PPO is our own implementation. Its implementation details follow CleanRL's `ppo.py` (MIT), used as a reference, and Stable-Baselines3 isn't used.
+- Training maps are our own procedural maps plus Freedoom 2 (bundled with ViZDoom). Evaluation maps are never accessed.
 
-**Compute tip:** training only on raw pixels is expensive. The `rays`, `visible_entities` and
-`vitals` signals run thousands of steps per second on a CPU. Hybrid pixel + spatial models are welcome.
+## Credits and references
+CleanRL PPO (reference); Beeching et al. *EgoMap* (2020) and *Deep RL on a Budget* (2019); Parisotto & Salakhutdinov *Neural Map*;
+Lample & Chaplot *Playing FPS Games with Deep RL* (auxiliary game features); Chen et al. *Learning by Cheating* (privileged teacher);
+Schmitt et al. *Kickstarting Deep RL*; Ross et al. *DAgger*. ViZDoom and Freedoom.
 
-## Hardware at evaluation
+---
+<details><summary>Original template instructions</summary>
 
-One NVIDIA **RTX 3090 (24 GB)** shared between evaluation workers. Each agent gets **2 GB VRAM,
-8 GB RAM and 1 CPU thread**, so keep models compact and inference fast
-(see [hardware](docs/EVALUATION.md#hardware) and [timeouts](docs/EVALUATION.md#timeouts)).
-`validate.py` runs your agent under the same CPU/RAM limits and reports GPU memory.
-
-## Documentation
-
-| Doc | What's inside |
-| --- | --- |
-| [docs/CONTRACT.md](docs/CONTRACT.md) | Observation/action spaces and the `DoomAgent` interface |
-| [docs/RULES.md](docs/RULES.md) | Ground rules: what's allowed, what gets you disqualified |
-| [docs/SUBMISSION.md](docs/SUBMISSION.md) | Submission checklist, Git LFS, 1 GB limit, `requirements.txt` |
-| [docs/EVALUATION.md](docs/EVALUATION.md) | Map tiers, scoring categories, timeouts, replays |
-
-## Rules in one minute
-
-- Actions must come from **trained neural parameters**: no rule trees, no `A*`/Dijkstra, no `atan2` aimbots,
-  no unmodified off-the-shelf SB3.
-- Change anything you want **during training**. Evaluation uses the **vanilla engine**, the
-  official wrapper and **unseen maps**.
-- Create the repo during the hackathon. Libraries are fine; the core architecture and training must be yours.
+See [docs/CONTRACT.md](docs/CONTRACT.md), [docs/RULES.md](docs/RULES.md), [docs/SUBMISSION.md](docs/SUBMISSION.md),
+[docs/EVALUATION.md](docs/EVALUATION.md). Quickstart: `uv sync && uv run python validate.py`; Docker: `docker build -t devforge-doom .`
+then `python validate.py --docker --image devforge-doom`.
+</details>
