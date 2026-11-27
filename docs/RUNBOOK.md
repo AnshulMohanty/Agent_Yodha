@@ -64,9 +64,9 @@ A second background program (`training/eval/autopilot.py`) checks everything **e
 2. In its terminal, run:
    ```bash
    git pull && git lfs pull
-   pip install uv && uv sync
-   uv run python validate.py --docker
+   python3 validate.py --docker --no-gpu
    ```
+   (`--no-gpu` is needed because a codespace has no GPU. The first run downloads the judges' image, which takes about 5–10 min.)
 3. **Good:** the last line says **PASSED**. The CPU-limit and RAM lines show real numbers here, not warnings.
 4. Optional: also set **Settings → Codespaces → Default idle timeout = 240 minutes**.
 
@@ -79,7 +79,7 @@ A second background program (`training/eval/autopilot.py`) checks everything **e
 | 07:00 → 07:40 | Codespaces Docker check (section 3) on the current submission. It tests the machine setup, so it stays valid after finalize. | **You** |
 | 07:45 → about 08:25 | **Finalize, automatic:** stops training. Tests every recent model (plus averaged ones and Kaggle) on 24 maps. Then retests the best 3 on 60 new maps at 3 randomness settings. Installs the winner, validates, rebuilds the brief, pushes, records final videos. Report: `runs/FINAL_REPORT.md`. | automatic |
 | If Kaggle arrives late | `PYTHONPATH=. uv run python -m training.eval.finalize --now --quick runs/kaggle_b_export` (about 10 min). It replaces the submission only if Kaggle is better. | you or Claude |
-| About 08:30 | Tell Claude "check final". Quick re-check in Codespaces: `git pull && git lfs pull && uv run python validate.py --docker`. Open `brief/brief.pdf` and `runs/videos/final_T3.mp4`. | **You** |
+| About 08:30 | Tell Claude "check final". Quick re-check in Codespaces: `git pull && git lfs pull && python3 validate.py --docker --no-gpu`. Open `brief/brief.pdf` and `runs/videos/final_T3.mp4`. | **You** |
 | By 09:30 | Submit the repo link and `brief/brief.pdf` on the form. | **You** |
 
 ## 5. If something looks wrong
