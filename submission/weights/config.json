@@ -2,7 +2,12 @@
  "hidden": 512,
  "use_pixels": true,
  "temperature": 0.7,
- "steps": 12976128,
- "source": "runs/snaps/s12.98M",
- "heldout_proxy_score": 776.0
+ "steps": 24018944,
+ "averaged": [
+  "ckpt_0022M.pt",
+  "ckpt_0023M.pt",
+  "ckpt_0024M.pt"
+ ],
+ "source": "runs/final/cand/mac_avg3",
+ "heldout_proxy_score": 814.8
 }
